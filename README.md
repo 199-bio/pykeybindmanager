@@ -26,15 +26,26 @@ A simple Python module for listening to specific keyboard keybinds (single keys 
 -   **macOS:** Requires "Input Monitoring" permission for the application/terminal running the script. The script attempts to handle the `OBJC_DISABLE_INITIALIZE_FORK_SAFETY` environment variable needed by `pynput` on macOS. The `fn` key is supported. `cmd` key is mapped correctly.
 -   **Linux:** May require root privileges depending on the environment, or the user needs to be in the `input` group. `meta` key is mapped to `ctrl`.
 -   **Windows:** Should generally work without special permissions. `meta` key is mapped to `ctrl`.
--   **Sound Playback:** Relies on common system utilities (`afplay` on macOS, `winsound` on Windows, `aplay`/`paplay`/`mplayer`/`mpg123` on Linux). If these are not available, sound playback might fail silently or log a warning.
+    -   **Sound Playback:** Relies on common system utilities (`afplay` on macOS, `winsound` on Windows, `aplay`/`paplay`/`mplayer`/`mpg123` on Linux). If these are not available, sound playback might fail silently or log a warning.
 
 ## Installation
 
-Currently, this is a local module. You can include it in your project structure or install it locally if you add a `setup.py`.
+Install the package from PyPI using pip:
 
-To use it directly, ensure the `pykeybindmanager` directory is in your Python path.
+```bash
+pip install pykeybindmanager
+```
 
-You also need to install the dependency:
+This will also automatically install the required `pynput` dependency.
+
+### Development Installation
+
+If you have cloned the repository and want to install it for development (e.g., to make changes):
+
+```bash
+# Navigate to the repository root directory (where pyproject.toml is)
+pip install -e .
+```
 
 ```bash
 pip install pynput
