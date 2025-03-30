@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"] # Specify build tools
+build-backend = "setuptools.build_meta"  # Use setuptools as the build backend
+
+[project]
+name = "pykeybindmanager"
+version = "0.2.0" # Matches __init__.py
+authors = [
+    { name="Boris Djordjevic" }, # Using the name provided earlier
+]
+description = "A simple Python module for listening to keyboard keybinds (single keys or combinations) with toggle, double-press, and hold support."
+readme = "README.md" # Link to your README file
+license = "MIT" # Use SPDX identifier instead of table
+requires-python = ">=3.7" # Specify minimum Python version (pynput needs >=3.7)
+classifiers = [ # Standard classifiers for PyPI
+    "Development Status :: 4 - Beta", # Or 3 - Alpha if preferred
+    "Intended Audience :: Developers",
+    # "License :: OSI Approved :: MIT License", # Removed - covered by SPDX identifier above
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Desktop Environment",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "pynput>=1.7.0", # Specify the core dependency
+]
+
+[project.urls] # Optional: Links for PyPI page
+# Replace YOUR_USERNAME with the actual GitHub username or organization
+"Homepage" = "https://github.com/YOUR_USERNAME/pykeybindmanager"
+"Bug Tracker" = "https://github.com/YOUR_USERNAME/pykeybindmanager/issues"
+
+[tool.setuptools.packages.find]
+where = ["."] # Look for packages in the current directory
+# Tells setuptools to automatically find the pykeybindmanager package
+# and its subpackages (like sounds)
+include = ["pykeybindmanager*"]
+exclude = ["tests*"] # Exclude tests if you add them later
+
+[tool.setuptools.package-data]
+# Ensure the sound files are included in the package
+"pykeybindmanager.sounds" = ["*.wav"]
