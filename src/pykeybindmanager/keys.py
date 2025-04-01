@@ -162,5 +162,4 @@ if __name__ == '__main__':
         except Exception as e:
              print(f"'{k_str}' -> UNEXPECTED ERROR: {type(e).__name__}: {e}")
              # import traceback
-             # traceback.print_exc() # Uncomment for detailed trace
     print("--- Keybind Parser Test End ---")

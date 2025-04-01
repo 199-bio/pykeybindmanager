@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-01-04
+
+### Changed
+
+-   Removed several commented-out code lines from `manager.py`, `keys.py`, and `sound_player.py`.
+-   Synchronized version number to `0.2.2` in `src/pykeybindmanager/__init__.py` and `pyproject.toml`.
+-   Updated `README.md` to reflect version `0.2.2` and removed redundant installation step.
+
 ## [0.2.0] - 2025-03-31
 
 ### Added

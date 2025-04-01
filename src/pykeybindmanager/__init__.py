@@ -26,4 +26,4 @@ __all__ = [
 ]
 
 # Optional: Define a version for the module
-__version__ = "0.2.0" # Updated version
+__version__ = "0.2.2" # Matches pyproject.toml

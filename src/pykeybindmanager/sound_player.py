@@ -195,4 +195,3 @@ if __name__ == "__main__":
     play_sound_file('invalid', blocking=True)
     print("--- Sound Player Test End ---")
     # Explicitly call cleanup for testing if needed, though atexit should handle it
-    # _cleanup_temp_files()

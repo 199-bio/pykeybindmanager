@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"  # Use setuptools as the build backend
 
 [project]
 name = "pykeybindmanager"
-version = "0.2.0" # Matches __init__.py
+version = "0.2.2" # Matches __init__.py
 authors = [
     { name="Boris Djordjevic" }, # Using the name provided earlier
 ]
@@ -39,13 +39,11 @@ dependencies = [
 "Homepage" = "https://github.com/YOUR_USERNAME/pykeybindmanager"
 "Bug Tracker" = "https://github.com/YOUR_USERNAME/pykeybindmanager/issues"
 
+[tool.setuptools]
+# Tell setuptools to find packages automatically in the 'src' directory
 [tool.setuptools.packages.find]
-where = ["."] # Look for packages in the current directory
-# Tells setuptools to automatically find the pykeybindmanager package
-# and its subpackages (like sounds)
-include = ["pykeybindmanager*"]
-exclude = ["tests*"] # Exclude tests if you add them later
+where = ["src"]  # Look for packages in the src directory
 
 [tool.setuptools.package-data]
-# Ensure the sound files are included in the package
+# Ensure the sound files are included (relative to the package dir inside src)
 "pykeybindmanager.sounds" = ["*.wav"]

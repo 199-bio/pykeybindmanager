@@ -19,6 +19,15 @@ except ImportError:
     keyboard = None
     # Raise PynputImportError later if needed
 
+# --- Shared Listener State ---
+_shared_listener_instance = None
+_shared_listener_thread = None
+_active_managers = []
+_pressed_keys = set()
+_manager_lock = threading.Lock()
+_stop_event = threading.Event()
+# --- End Shared Listener State ---
+
 class KeybindManager:
     """
     Listens for a specific keyboard keybind (single key or combination)
@@ -78,118 +87,51 @@ class KeybindManager:
         self.on_activated = on_activated
         self.on_error = on_error or (lambda e: logger.error(f"KeybindManager Error: {e}")) # Default error handler
         self.double_press_threshold = double_press_threshold
-
-        self._pressed_keys = set() # Track currently held keys
-        self._last_press_time = 0 # For double press detection
-        self._listener_thread = None
-        self._listener_instance = None
-        self._stop_event = threading.Event()
+        self._last_press_time = 0 # For double press detection (still instance-specific)
 
         # Reduced logging
         logger.info(f"KeybindManager initialized for: Modifiers={{{', '.join(m.name for m in self.target_modifiers)}}}, Key={self.target_main_key}, Trigger='{self.trigger_type}'")
 
     def start_listener(self):
-        """Starts the keyboard listener in a separate thread."""
-        if self._listener_thread and self._listener_thread.is_alive():
-            logger.warning("Listener thread already running.")
-            return
-
-        self._stop_event.clear()
-        self._pressed_keys.clear() # Clear state on start
-        try:
-            self._listener_thread = threading.Thread(target=self._run_listener, daemon=True)
-            self._listener_thread.start()
-            logger.info("Keyboard listener thread started.")
-        except Exception as e:
-            error = ListenerError(f"Failed to start listener thread: {e}")
-            logger.error(error) # Log error
-            # logger.error(traceback.format_exc()) # Avoid verbose trace unless debugging
-            self.on_error(error)
-
-    def stop_listener(self):
-        """Stops the keyboard listener thread."""
-        if not self._listener_thread or not self._listener_thread.is_alive():
-            # logger.info("Listener thread not running.") # Reduce noise
-            return
-
-        logger.info("Stopping keyboard listener thread...")
-        self._stop_event.set()
-
-        if self._listener_instance:
-            try:
-                self._listener_instance.stop()
-            except Exception as e:
-                 logger.error(f"Error stopping pynput listener instance: {e}")
-
-        self._listener_thread.join(timeout=2.0)
-
-        if self._listener_thread.is_alive():
-            logger.warning("Listener thread did not stop gracefully.")
-        else:
-            logger.info("Listener thread stopped.")
-
-        self._listener_thread = None
-        self._listener_instance = None
-        self._pressed_keys.clear() # Clear state on stop
-
-    def _run_listener(self):
-        """The target function for the listener thread."""
-        try:
-            # Set macOS env var if needed (only log if setting it)
-            if sys.platform == 'darwin' and 'OBJC_DISABLE_INITIALIZE_FORK_SAFETY' not in os.environ:
-                os.environ['OBJC_DISABLE_INITIALIZE_FORK_SAFETY'] = 'YES'
-                logger.info("Set OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES for macOS")
-
-            # logger.debug("pynput listener starting...") # Reduce noise
-            # Use on_press and on_release
-            with keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release) as self._listener_instance:
-                self._stop_event.wait()
-                # logger.debug("Stop event received, exiting listener loop.") # Reduce noise
-
-        except OSError as e:
-            # Handle permission errors specifically
-            if sys.platform == 'darwin' and ("Operation not permitted" in str(e) or "permission" in str(e).lower()):
-                error = PermissionError("Input Monitoring permission denied for pynput.")
-                logger.error(error)
-                self.on_error(error)
+        """Registers this manager to receive events from the shared listener."""
+        global _active_managers, _manager_lock
+        with _manager_lock:
+            if self not in _active_managers:
+                _active_managers.append(self)
+                logger.debug(f"Manager for {self.target_main_key} added to active list.")
+                # Start the shared listener only if this is the first active manager
+                if len(_active_managers) == 1:
+                    _start_shared_listener()
             else:
-                error = ListenerError(f"Unhandled OSError in listener: {e}")
-                logger.error(error)
-                # logger.error(traceback.format_exc()) # Avoid verbose trace
-                self.on_error(error)
-        except Exception as e:
-            error = ListenerError(f"Unexpected error in listener thread: {e}")
-            logger.error(error)
-            # logger.error(traceback.format_exc()) # Avoid verbose trace
-            self.on_error(error)
-        finally:
-             # logger.debug("pynput listener thread finished.") # Reduce noise
-             self._listener_instance = None
-
-    def _get_currently_pressed_modifiers(self):
-        """Returns the set of currently pressed known modifier keys."""
-        # Intersect pressed keys with the values from MODIFIER_MAP
-        return self._pressed_keys.intersection(MODIFIER_MAP.values())
-
-    def _on_key_press(self, key):
-        """Callback executed by pynput when a key is pressed."""
-        if self._stop_event.is_set():
-            return False # Stop the listener
-
-        # Add key to the set of pressed keys *before* checking
-        # Use normalized key representation if possible (pynput might handle this)
-        self._pressed_keys.add(key)
-
+                 logger.warning(f"Manager for {self.target_main_key} already active.")
+    def stop_listener(self):
+        """Deregisters this manager from the shared listener."""
+        global _active_managers, _manager_lock
+        with _manager_lock:
+            if self in _active_managers:
+                _active_managers.remove(self)
+                logger.debug(f"Manager for {self.target_main_key} removed from active list.")
+                # Stop the shared listener only if this was the last active manager
+                if not _active_managers:
+                    _stop_shared_listener()
+    # _run_listener method removed as it's handled by the shared listener thread
+    # _get_currently_pressed_modifiers removed, logic incorporated into _check_and_handle_press
+    def _check_and_handle_press(self, key, current_pressed_keys_snapshot):
+        """
+        Checks if the pressed key matches this manager's keybind, given the
+        current global state of pressed keys, and triggers the callback if needed.
+        Called by the shared listener's _on_shared_press.
+        """
         try:
-            # Check if the pressed key is the main target key
+            # Check if the pressed key is the main target key for this manager
             if key == self.target_main_key:
-                # Check if the currently pressed modifiers match the target modifiers
-                current_modifiers = self._get_currently_pressed_modifiers()
+                # Extract currently pressed *known* modifiers from the global snapshot
+                current_modifiers = current_pressed_keys_snapshot.intersection(MODIFIER_MAP.values())
 
                 # We need exact match: all target modifiers must be pressed,
                 # and no *other* known modifiers should be pressed.
                 if current_modifiers == self.target_modifiers:
-                    # --- Keybind Match Found ---
+                    # --- Keybind Match Found for this manager ---
                     current_time = time.time()
 
                     if self.trigger_type == 'toggle':
@@ -201,55 +143,170 @@ class KeybindManager:
                         press_type = 'single'
                         if time_since_last < self.double_press_threshold:
                             press_type = 'double'
-                        self._last_press_time = current_time # Update time *only* on match
+                        # Update instance-specific last press time *only* on match
+                        self._last_press_time = current_time
                         self._trigger_callback(press_type)
 
                     elif self.trigger_type == 'hold':
                         self._trigger_callback('press')
-                        # Reset last press time for hold to avoid double-press interference if reused
+                        # Reset instance-specific last press time for hold
                         self._last_press_time = 0
 
         except Exception as e:
-            logger.error(f"Error during key press processing: {e}")
-            # logger.error(traceback.format_exc()) # Avoid verbose trace
-
-        return True # Continue listening
-
-    def _on_key_release(self, key):
-        """Callback executed by pynput when a key is released."""
-        if self._stop_event.is_set():
-            return False # Stop the listener
-
+            # Log error specific to this manager's handling
+            logger.error(f"Error during key press check for {self.target_main_key}: {e}")
+    def _check_and_handle_release(self, key):
+        """
+        Checks if the released key matches this manager's target key for 'hold'
+        trigger and triggers the callback if needed.
+        Called by the shared listener's _on_shared_release.
+        """
         try:
             # Check if the released key is the main target key for the 'hold' trigger
             if self.trigger_type == 'hold' and key == self.target_main_key:
-                 # Check if the target modifiers were held *just before* release.
-                 # This is tricky because the modifier might be released slightly before/after.
-                 # A simpler check: assume if the main key is released, the 'hold' ends.
-                 # We don't need to re-verify modifiers on release for 'hold'.
+                 # The shared listener handles tracking pressed keys globally.
+                 # We only need to check if this manager cares about this release.
+                 # We assume the modifiers *were* correct when the press happened.
                  self._trigger_callback('release')
 
         except Exception as e:
-            logger.error(f"Error during key release processing: {e}")
-            # logger.error(traceback.format_exc()) # Avoid verbose trace
-        finally:
-            # Always remove the key from the set on release
-            self._pressed_keys.discard(key) # Use discard to avoid KeyError if release comes without press
+            # Log error specific to this manager's handling
+            logger.error(f"Error during key release check for {self.target_main_key}: {e}")
 
-        return True # Continue listening
-
+        # Note: The global _pressed_keys set is managed by _on_shared_release
     def _trigger_callback(self, event_type):
         """Safely triggers the user's on_activated callback."""
         if self.on_activated:
             try:
-                # logger.debug(f"Triggering callback with event: {event_type}") # Reduce noise
                 self.on_activated(event_type)
             except Exception as cb_e:
                  logger.error(f"Error in on_activated callback: {cb_e}")
-                 # logger.error(traceback.format_exc()) # Avoid verbose trace
                  # Optionally call self.on_error here if callback errors should be reported
-                 # self.on_error(ListenerError(f"Error in on_activated callback: {cb_e}"))
 
+# --- Shared Listener Control Functions ---
+
+def _start_shared_listener():
+    """Starts the shared pynput listener if not already running."""
+    global _shared_listener_instance, _shared_listener_thread, _stop_event, _pressed_keys
+    if _shared_listener_thread and _shared_listener_thread.is_alive():
+        return # Already running
+
+    logger.info("Starting shared keyboard listener thread...")
+    _stop_event.clear()
+    _pressed_keys.clear() # Reset global state on start
+
+    def listener_thread_target():
+        global _shared_listener_instance
+        try:
+            # Set macOS env var if needed
+            if sys.platform == 'darwin' and 'OBJC_DISABLE_INITIALIZE_FORK_SAFETY' not in os.environ:
+                os.environ['OBJC_DISABLE_INITIALIZE_FORK_SAFETY'] = 'YES'
+                logger.info("Set OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES for macOS (Shared Listener)")
+
+            with keyboard.Listener(on_press=_on_shared_press, on_release=_on_shared_release) as listener:
+                _shared_listener_instance = listener
+                _stop_event.wait() # Wait until stop is requested
+        except OSError as e:
+             # Handle permission errors specifically
+            if sys.platform == 'darwin' and ("Operation not permitted" in str(e) or "permission" in str(e).lower()):
+                error = PermissionError("Input Monitoring permission denied for pynput (Shared Listener).")
+                logger.error(error)
+                # Propagate error to all active managers? Difficult. Log is best effort.
+                # Consider adding a global error callback?
+            else:
+                error = ListenerError(f"Unhandled OSError in shared listener: {e}")
+                logger.error(error)
+            # Attempt to notify managers?
+            with _manager_lock:
+                for manager in _active_managers:
+                    manager.on_error(error) # Notify active managers
+        except Exception as e:
+            error = ListenerError(f"Unexpected error in shared listener thread: {e}")
+            logger.error(error)
+            # Attempt to notify managers?
+            with _manager_lock:
+                for manager in _active_managers:
+                    manager.on_error(error) # Notify active managers
+        finally:
+            logger.debug("Shared pynput listener thread finished.")
+            _shared_listener_instance = None # Clear instance on exit
+
+    _shared_listener_thread = threading.Thread(target=listener_thread_target, daemon=True)
+    _shared_listener_thread.start()
+
+def _stop_shared_listener():
+    """Stops the shared pynput listener if running."""
+    global _shared_listener_instance, _shared_listener_thread, _stop_event
+    if not _shared_listener_thread or not _shared_listener_thread.is_alive():
+        return # Not running
+
+    logger.info("Stopping shared keyboard listener thread...")
+    _stop_event.set()
+
+    if _shared_listener_instance:
+        try:
+            # Attempt to stop the listener instance directly
+            # This might help unblock the thread if it's stuck
+            _shared_listener_instance.stop()
+        except Exception as e:
+            logger.error(f"Error stopping shared pynput listener instance: {e}")
+
+    _shared_listener_thread.join(timeout=2.0)
+
+    if _shared_listener_thread.is_alive():
+        logger.warning("Shared listener thread did not stop gracefully.")
+    else:
+        logger.info("Shared listener thread stopped.")
+
+    _shared_listener_thread = None
+    _shared_listener_instance = None
+    _pressed_keys.clear() # Reset global state on stop
+
+# --- Shared Listener Callbacks ---
+
+def _on_shared_press(key):
+    """Callback for key presses from the shared listener."""
+    if _stop_event.is_set():
+        return False # Stop listener
+
+    _pressed_keys.add(key) # Update global state *before* dispatching
+
+    with _manager_lock:
+        # Iterate over a copy in case managers deregister during iteration
+        managers_to_notify = list(_active_managers)
+
+    # Perform checks outside the lock to avoid holding it during callbacks
+    current_pressed_keys_snapshot = frozenset(_pressed_keys) # Pass immutable snapshot
+    for manager in managers_to_notify:
+        try:
+            manager._check_and_handle_press(key, current_pressed_keys_snapshot)
+        except Exception as e:
+            logger.error(f"Error dispatching press event to manager {manager}: {e}")
+
+    return True # Continue listening
+
+def _on_shared_release(key):
+    """Callback for key releases from the shared listener."""
+    if _stop_event.is_set():
+        return False # Stop listener
+
+    with _manager_lock:
+        # Iterate over a copy
+        managers_to_notify = list(_active_managers)
+
+    # Perform checks outside the lock
+    for manager in managers_to_notify:
+         try:
+            manager._check_and_handle_release(key)
+         except Exception as e:
+            logger.error(f"Error dispatching release event to manager {manager}: {e}")
+
+    # Update global state *after* dispatching release checks
+    _pressed_keys.discard(key)
+
+    return True # Continue listening
+
+# --- End Shared Listener Components ---
 
 # Example Usage (for testing the module directly)
 if __name__ == '__main__':
@@ -282,7 +339,6 @@ if __name__ == '__main__':
         ("fn", 'hold', handle_hold_event), # macOS specific 'fn' hold
         ("ctrl+c", 'toggle', handle_toggle_event), # Combination toggle
         ("alt+shift+1", 'toggle', handle_toggle_event), # Multi-modifier combo
-        # ("ctrl+f3", 'double_press_toggle', handle_double_toggle_event), # INVALID: Double press on combo
     ]
     if sys.platform != 'darwin':
          test_cases = [tc for tc in test_cases if 'fn' not in tc[0] and 'cmd' not in tc[0]]
